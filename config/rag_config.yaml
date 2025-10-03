@@ -1,0 +1,212 @@
+# Cricket Analytics RAG Configuration
+
+# RAG System Configuration
+rag:
+  # Embedding settings
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  chunk_size: 1000
+  chunk_overlap: 200
+  
+  # Vector database settings
+  vector_db:
+    type: "chroma"  # or "faiss"
+    persist_directory: "./data/vectordb"
+    collection_name: "cricket_analytics"
+  
+  # Retrieval settings
+  top_k: 5
+  similarity_threshold: 0.7
+  
+  # Text processing
+  text_splitter:
+    type: "recursive"
+    separators: ["\n\n", "\n", ". ", " ", ""]
+
+# LLM Configuration
+llm:
+  provider: "openai"  # openai, anthropic, local
+  model: "gpt-3.5-turbo"
+  temperature: 0.3
+  max_tokens: 1000
+  
+  # Fallback models
+  fallback_models:
+    - "gpt-3.5-turbo-0125"
+    - "gpt-4"
+
+# LangGraph Configuration
+langgraph:
+  # Node execution settings
+  max_iterations: 10
+  timeout_seconds: 30
+  
+  # Reasoning settings
+  enable_multi_hop: true
+  enable_parallel_execution: true
+  
+  # Node types and their settings
+  nodes:
+    data_retrieval:
+      timeout: 10
+      max_documents: 10
+    
+    player_analysis:
+      timeout: 15
+      detail_level: "high"
+    
+    match_analysis:
+      timeout: 15
+      include_venue_stats: true
+    
+    tactical_reasoning:
+      timeout: 20
+      generate_alternatives: true
+    
+    synthesis:
+      timeout: 10
+      max_answer_length: 2000
+
+# Data Sources Configuration
+data_sources:
+  cricinfo:
+    base_url: "https://cricinfo.espn.com/api/"
+    rate_limit_requests_per_minute: 60
+    
+  kaggle:
+    datasets:
+      - "cricsheet/cricket-data"
+      - "cclayford/cricinfo-statsguru-data"
+    
+  local:
+    ball_by_ball_path: "./data/raw/ball_by_ball.csv"
+    commentary_path: "./data/raw/commentary"
+    reports_path: "./data/raw/reports"
+
+# Processing Configuration
+processing:
+  # Data cleaning settings
+  remove_duplicates: true
+  handle_missing_values: true
+  standardize_player_names: true
+  
+  # Cricket-specific processing
+  calculate_derived_metrics: true
+  include_situational_context: true
+  
+  # Output settings
+  save_processed_data: true
+  processed_data_format: "parquet"  # csv, parquet, json
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+  
+  # CORS settings
+  allow_origins: ["*"]
+  allow_methods: ["GET", "POST"]
+  allow_headers: ["*"]
+  
+  # Rate limiting
+  rate_limit:
+    requests_per_minute: 100
+    burst_size: 10
+
+# Evaluation Configuration
+evaluation:
+  # Ground truth data
+  ground_truth_path: "./data/evaluation/ground_truth.json"
+  
+  # Metrics to calculate
+  metrics:
+    - "accuracy"
+    - "f1_score"
+    - "relevance"
+    - "cricket_expertise"
+  
+  # Test queries
+  test_queries_path: "./data/evaluation/test_queries.json"
+  
+  # Expert evaluation
+  expert_evaluation:
+    enabled: false
+    expert_panel_size: 3
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # File logging
+  file_logging:
+    enabled: true
+    log_file: "./logs/cricket_analytics.log"
+    max_size_mb: 10
+    backup_count: 5
+  
+  # Component-specific logging
+  components:
+    rag: "INFO"
+    langgraph: "INFO" 
+    data_processing: "DEBUG"
+    api: "INFO"
+
+# Development Configuration
+development:
+  # Debug settings
+  debug_mode: true
+  verbose_output: true
+  
+  # Sample data settings
+  use_sample_data: true
+  sample_data_size: 1000
+  
+  # Caching
+  cache_embeddings: true
+  cache_llm_responses: false
+
+# Production Configuration
+production:
+  # Performance settings
+  enable_caching: true
+  cache_ttl_seconds: 3600
+  
+  # Security settings
+  api_key_required: true
+  rate_limiting_enabled: true
+  
+  # Monitoring
+  enable_metrics: true
+  metrics_endpoint: "/metrics"
+  
+  # Backup settings
+  backup_vectordb: true
+  backup_frequency_hours: 24
+
+# Cricket-Specific Configuration
+cricket:
+  # Match formats
+  supported_formats: ["Test", "ODI", "T20", "T10"]
+  
+  # Key metrics to track
+  key_metrics:
+    batting: ["runs", "average", "strike_rate", "centuries", "fifties"]
+    bowling: ["wickets", "average", "economy", "strike_rate", "five_wickets"]
+    fielding: ["catches", "stumpings", "run_outs"]
+  
+  # Situational contexts
+  situations:
+    - "powerplay"
+    - "middle_overs" 
+    - "death_overs"
+    - "chase_scenarios"
+    - "pressure_situations"
+  
+  # Analysis dimensions
+  analysis_dimensions:
+    - "player_vs_opposition"
+    - "player_vs_bowling_type"
+    - "venue_performance"
+    - "format_specific"
+    - "season_analysis"
