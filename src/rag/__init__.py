@@ -133,7 +133,7 @@ class CricketRAG:
     """Main RAG system for cricket analytics"""
     
     def __init__(self, 
-                 openai_api_key: str = None,
+                 openai_api_key: Optional[str] = None,
                  model_name: str = "gpt-3.5-turbo",
                  temperature: float = 0.3):
         
