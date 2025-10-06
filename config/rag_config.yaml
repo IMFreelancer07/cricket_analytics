@@ -24,7 +24,7 @@ rag:
 
 # LLM Configuration
 llm:
-  provider: "openai"  # openai, anthropic, local
+  provider: "openai"  # openai, groq, gemini
   model: "gpt-3.5-turbo"
   temperature: 0.3
   max_tokens: 1000

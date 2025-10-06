@@ -41,6 +41,24 @@ cp .env.example .env
 # Edit .env with your API keys and configurations
 ```
 
+### Choose Your LLM Provider
+
+Set the `LLM_PROVIDER` environment variable to `openai`, `groq`, or `gemini`, then supply the matching API key. Examples below use PowerShell (`$env:`) and Bash (`export`).
+
+```powershell
+# PowerShell (Windows)
+$env:LLM_PROVIDER = "groq"
+$env:GROQ_API_KEY = "your-groq-key"
+```
+
+```bash
+# Bash / zsh (macOS, Linux)
+export LLM_PROVIDER=gemini
+export GEMINI_API_KEY="your-gemini-key"
+```
+
+If you stick with OpenAI, set `LLM_PROVIDER=openai` and `OPENAI_API_KEY` as before. You can also override the default model via `LLM_MODEL_NAME` and temperature with `LLM_TEMPERATURE` when needed.
+
 3. **Data Setup**
 ```bash
 # Download sample cricket datasets

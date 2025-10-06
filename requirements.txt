@@ -3,8 +3,11 @@ langchain==0.1.14
 langgraph==0.0.26
 langsmith==0.1.17
 langchain-community==0.0.32
+langchain-google-genai==0.0.8
 openai==1.12.0
 anthropic==0.8.1
+groq==0.11.0
+google-generativeai==0.3.2
 
 # Vector Database & Embeddings
 chromadb==0.4.22

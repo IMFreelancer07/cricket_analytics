@@ -3,22 +3,54 @@ RAG (Retrieval-Augmented Generation) Module for Cricket Analytics
 """
 
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 import logging
 from dataclasses import dataclass
+from enum import Enum
 
 # LangChain imports
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import JSONLoader, CSVLoader
-from langchain.schema import Document
+from langchain.schema import Document, BaseMessage
 from langchain_community.llms import OpenAI
+try:
+    from langchain_community.llms import Groq  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - optional dependency
+    Groq = None  # type: ignore[assignment]
+
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - optional dependency
+    ChatGoogleGenerativeAI = None  # type: ignore[assignment]
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
 logger = logging.getLogger(__name__)
+
+
+class LLMProvider(str, Enum):
+    """Supported LLM providers for the cricket RAG system."""
+
+    OPENAI = "openai"
+    GROQ = "groq"
+    GEMINI = "gemini"
+
+
+DEFAULT_LLM_MODELS: Dict[str, str] = {
+    LLMProvider.OPENAI.value: "gpt-3.5-turbo",
+    LLMProvider.GROQ.value: "mixtral-8x7b-32768",
+    LLMProvider.GEMINI.value: "gemini-pro",
+}
+
+
+ENV_API_KEY_MAP: Dict[str, List[str]] = {
+    LLMProvider.OPENAI.value: ["OPENAI_API_KEY"],
+    LLMProvider.GROQ.value: ["GROQ_API_KEY"],
+    LLMProvider.GEMINI.value: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+}
 
 @dataclass
 class CricketQuery:
@@ -131,34 +163,140 @@ class CricketRetriever:
 
 class CricketRAG:
     """Main RAG system for cricket analytics"""
-    
-    def __init__(self, 
-                 openai_api_key: Optional[str] = None,
-                 model_name: str = "gpt-3.5-turbo",
-                 temperature: float = 0.3):
-        
-        self.api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
-        self.llm: Optional[OpenAI] = None
-        if self.api_key:
-            self.llm = OpenAI(
-                openai_api_key=self.api_key,
-                model_name=model_name,
-                temperature=temperature
-            )
-        else:
-            logger.warning("OpenAI API key not provided. LLM-powered features will be disabled.")
-        
+
+    def __init__(
+        self,
+        llm_provider: str = LLMProvider.OPENAI.value,
+        *,
+        openai_api_key: Optional[str] = None,
+        groq_api_key: Optional[str] = None,
+        gemini_api_key: Optional[str] = None,
+        model_name: Optional[str] = None,
+        temperature: float = 0.3,
+    ):
+
+        self.llm_provider = self._normalize_provider(llm_provider)
+        self.temperature = temperature
+        self.model_name = model_name or DEFAULT_LLM_MODELS[self.llm_provider]
+        self.api_keys: Dict[str, Optional[str]] = {
+            LLMProvider.OPENAI.value: openai_api_key,
+            LLMProvider.GROQ.value: groq_api_key,
+            LLMProvider.GEMINI.value: gemini_api_key,
+        }
+
+        self.llm = self._initialize_llm()
+
         self.embedding_manager = CricketEmbeddingManager()
         self.vectorstore = self.embedding_manager.load_existing_vectorstore()
-        
+
         if self.vectorstore:
             self.retriever = CricketRetriever(self.vectorstore)
         else:
             self.retriever = None
             logger.warning("No vector store available. Call initialize_vectorstore() first.")
-        
+
         self.qa_chain = None
         self._setup_qa_chain()
+
+    def _normalize_provider(self, provider: Optional[str]) -> str:
+        normalized = (provider or LLMProvider.OPENAI.value).lower()
+        if normalized not in DEFAULT_LLM_MODELS:
+            logger.warning(
+                "Unsupported LLM provider '%s'. Falling back to '%s'.",
+                normalized,
+                LLMProvider.OPENAI.value,
+            )
+            return LLMProvider.OPENAI.value
+        return normalized
+
+    def _get_api_key(self, provider: str) -> Optional[str]:
+        explicit = self.api_keys.get(provider)
+        if explicit:
+            return explicit
+        for env_key in ENV_API_KEY_MAP.get(provider, []):
+            env_value = os.getenv(env_key)
+            if env_value:
+                return env_value
+        return None
+
+    def _initialize_llm(self) -> Optional[Any]:
+        api_key = self._get_api_key(self.llm_provider)
+        if not api_key:
+            logger.warning(
+                "%s API key not provided. LLM-powered features will be disabled.",
+                self.llm_provider.upper(),
+            )
+            return None
+
+        try:
+            if self.llm_provider == LLMProvider.OPENAI.value:
+                llm_instance = OpenAI(
+                    openai_api_key=api_key,
+                    model_name=self.model_name,
+                    temperature=self.temperature,
+                )
+            elif self.llm_provider == LLMProvider.GROQ.value:
+                if Groq is None:
+                    logger.error(
+                        "Groq provider requested but 'groq' / langchain community integration is missing. "
+                        "Install the groq extra dependencies to enable it."
+                    )
+                    return None
+                llm_instance = Groq(
+                    groq_api_key=api_key,
+                    model_name=self.model_name,
+                    temperature=self.temperature,
+                )
+            elif self.llm_provider == LLMProvider.GEMINI.value:
+                if ChatGoogleGenerativeAI is None:
+                    logger.error(
+                        "Gemini provider requested but 'langchain-google-genai' is not installed."
+                    )
+                    return None
+                llm_instance = ChatGoogleGenerativeAI(
+                    api_key=api_key,
+                    model=self.model_name,
+                    temperature=self.temperature,
+                    convert_system_message_to_human=True,
+                )
+            else:
+                logger.error("Unsupported LLM provider '%s'.", self.llm_provider)
+                return None
+
+            logger.info(
+                "Initialized %s provider with model '%s'.",
+                self.llm_provider,
+                self.model_name,
+            )
+            return llm_instance
+
+        except Exception as exc:  # pragma: no cover - network/provider errors
+            logger.error(f"Failed to initialize {self.llm_provider} LLM: {exc}")
+            return None
+
+    def _invoke_llm(self, prompt: str) -> str:
+        if not self.llm:
+            raise ValueError("LLM is not configured. Please provide valid API credentials.")
+
+        try:
+            if hasattr(self.llm, "predict"):
+                return self.llm.predict(prompt)  # type: ignore[no-any-return]
+
+            response: Union[str, BaseMessage, Any] = (
+                self.llm.invoke(prompt) if hasattr(self.llm, "invoke") else self.llm(prompt)  # type: ignore[call-arg]
+            )
+
+            if isinstance(response, BaseMessage):
+                return str(response.content)
+            if isinstance(response, str):
+                return response
+            if isinstance(response, dict) and "content" in response:
+                return str(response["content"])  # Fallback for dict responses
+            return str(response)
+
+        except Exception as exc:  # pragma: no cover - network/provider errors
+            logger.error(f"Failed to invoke {self.llm_provider} LLM: {exc}")
+            raise
     
     def _setup_qa_chain(self):
         """Setup the QA chain with cricket-specific prompts"""
@@ -313,7 +451,10 @@ class CricketRAG:
             if not self.llm:
                 logger.warning("LLM is not configured; returning context without generated answer.")
                 return {
-                    "answer": "LLM is not configured. Please provide an OpenAI API key to enable generated insights.",
+                    "answer": (
+                        "LLM is not configured. Please provide valid API credentials for the selected "
+                        f"provider ('{self.llm_provider}') to enable generated insights."
+                    ),
                     "sources": [doc.page_content[:200] + "..." for doc in documents],
                     "filters_applied": filters,
                     "num_sources": len(documents)
@@ -329,7 +470,7 @@ class CricketRAG:
             Provide a detailed analysis with supporting statistics and insights.
             """
             
-            answer = self.llm(prompt)
+            answer = self._invoke_llm(prompt)
             
             return {
                 "answer": answer,
@@ -344,10 +485,49 @@ class CricketRAG:
 
 
 # Utility functions
-def setup_cricket_rag(data_directory: str = "data/processed") -> Optional[CricketRAG]:
-    """Setup and initialize cricket RAG system"""
+def setup_cricket_rag(
+    data_directory: str = "data/processed",
+    *,
+    llm_provider: Optional[str] = None,
+    model_name: Optional[str] = None,
+    temperature: Optional[float] = None,
+    openai_api_key: Optional[str] = None,
+    groq_api_key: Optional[str] = None,
+    gemini_api_key: Optional[str] = None,
+) -> Optional[CricketRAG]:
+    """Setup and initialize cricket RAG system with configurable LLM provider."""
+
     try:
-        rag = CricketRAG()
+        provider = llm_provider or os.getenv("LLM_PROVIDER") or LLMProvider.OPENAI.value
+
+        resolved_temperature: float
+        if temperature is not None:
+            resolved_temperature = temperature
+        else:
+            temp_env = os.getenv("LLM_TEMPERATURE")
+            if temp_env:
+                try:
+                    resolved_temperature = float(temp_env)
+                except ValueError:
+                    logger.warning(
+                        "Invalid LLM_TEMPERATURE value '%s'. Defaulting to 0.3.",
+                        temp_env,
+                    )
+                    resolved_temperature = 0.3
+            else:
+                resolved_temperature = 0.3
+
+        rag = CricketRAG(
+            llm_provider=provider,
+            openai_api_key=openai_api_key or os.getenv("OPENAI_API_KEY"),
+            groq_api_key=groq_api_key or os.getenv("GROQ_API_KEY"),
+            gemini_api_key=
+                gemini_api_key
+                or os.getenv("GEMINI_API_KEY")
+                or os.getenv("GOOGLE_API_KEY"),
+            model_name=model_name or os.getenv("LLM_MODEL_NAME"),
+            temperature=resolved_temperature,
+        )
         rag.initialize_vectorstore(data_directory)
         return rag
     except Exception as e:
