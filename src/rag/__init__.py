@@ -18,9 +18,9 @@ from langchain_community.document_loaders import JSONLoader, CSVLoader
 from langchain.schema import Document, BaseMessage
 from langchain_community.llms import OpenAI
 try:
-    from langchain_community.llms import Groq  # type: ignore[import-not-found]
+    from langchain_groq import ChatGroq  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - optional dependency
-    Groq = None  # type: ignore[assignment]
+    ChatGroq = None  # type: ignore[assignment]
 
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore[import-not-found]
@@ -317,17 +317,24 @@ class CricketRAG:
                     temperature=self.temperature,
                 )
             elif self.llm_provider == LLMProvider.GROQ.value:
-                if Groq is None:
+                if ChatGroq is None:
                     logger.error(
-                        "Groq provider requested but 'groq' / langchain community integration is missing. "
-                        "Install the groq extra dependencies to enable it."
+                        "Groq provider requested but 'langchain-groq' is not installed."
                     )
                     return None
-                llm_instance = Groq(
-                    groq_api_key=api_key,
-                    model_name=self.model_name,
-                    temperature=self.temperature,
-                )
+                # Handle possible constructor signature differences gracefully
+                try:
+                    llm_instance = ChatGroq(
+                        groq_api_key=api_key,  # common param name
+                        model_name=self.model_name,
+                        temperature=self.temperature,
+                    )
+                except TypeError:
+                    llm_instance = ChatGroq(  # type: ignore[call-arg]
+                        api_key=api_key,
+                        model=self.model_name,
+                        temperature=self.temperature,
+                    )
             elif self.llm_provider == LLMProvider.GEMINI.value:
                 if ChatGoogleGenerativeAI is None:
                     logger.error(
@@ -477,10 +484,26 @@ class CricketRAG:
             Dictionary containing answer and source information
         """
         if not self.qa_chain:
+            # Fallback: if retriever exists, return top sources with guidance (LLM not configured)
+            if self.retriever:
+                try:
+                    docs = self.retriever.retrieve_documents(cricket_query)
+                    return {
+                        "answer": (
+                            "LLM not configured or QA chain unavailable. Showing top retrieved context. "
+                            "Provide an API key for the selected provider to enable generated answers."
+                        ),
+                        "sources": [d.page_content[:200] + "..." for d in docs],
+                        "query_type": query_type,
+                        "num_sources": len(docs),
+                        "error": "LLM not configured",
+                    }
+                except Exception:
+                    pass
             return {
                 "answer": "RAG system not initialized. Please call initialize_vectorstore() first.",
                 "sources": [],
-                "error": "System not ready"
+                "error": "System not ready",
             }
         
         try:

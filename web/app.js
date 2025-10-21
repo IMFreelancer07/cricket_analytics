@@ -1,5 +1,6 @@
 const providerEl = document.getElementById('provider');
 const modelEl = document.getElementById('model');
+const apiKeyEl = document.getElementById('apiKey');
 const tempEl = document.getElementById('temperature');
 const tempValEl = document.getElementById('tempVal');
 const queryEl = document.getElementById('query');
@@ -75,6 +76,7 @@ askBtn.addEventListener('click', async () => {
       provider: providerEl.value,
       model_name: modelEl.value || undefined,
       temperature: Number(tempEl.value),
+      api_key: apiKeyEl.value || undefined,
     };
 
     const res = await fetch('/query', {

@@ -105,6 +105,7 @@ class QueryRequest(BaseModel):
     provider: Optional[str] = Field(default=None, description="LLM provider: openai | groq | gemini")
     model_name: Optional[str] = Field(default=None, description="Model name for the selected provider")
     temperature: Optional[float] = Field(default=None, ge=0, le=2, description="LLM temperature override")
+    api_key: Optional[str] = Field(default=None, description="Optional API key for the selected provider (not stored)")
 
 
 class QueryResponse(BaseModel):
@@ -217,11 +218,20 @@ async def query_cricket_analytics(
             # Apply per-request LLM configuration if provided
             if any([request.provider, request.model_name, request.temperature is not None]):
                 try:
-                    rag_system.set_llm(
+                    kwargs = dict(
                         provider=request.provider,
                         model_name=request.model_name,
                         temperature=request.temperature,
                     )
+                    if request.api_key and request.provider:
+                        p = request.provider.lower()
+                        if p == 'openai':
+                            kwargs['openai_api_key'] = request.api_key
+                        elif p == 'groq':
+                            kwargs['groq_api_key'] = request.api_key
+                        elif p == 'gemini':
+                            kwargs['gemini_api_key'] = request.api_key
+                    rag_system.set_llm(**kwargs)
                 except Exception as cfg_err:
                     logger.warning(f"Failed to apply per-request LLM config: {cfg_err}")
             if request.filters:
