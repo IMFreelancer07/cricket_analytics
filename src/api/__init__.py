@@ -3,13 +3,16 @@ FastAPI Application for Cricket Analytics RAG System
 """
 
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
 import os
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
 # Import our cricket modules (with error handling for development)
 try:
@@ -37,10 +40,14 @@ async def app_lifespan(_: FastAPI):
     global cricket_rag, cricket_analyzer
 
     try:
+        # Load environment variables from .env if present
+        load_dotenv()
         logger.info("Initializing Cricket Analytics services...")
 
         if CricketRAG and setup_cricket_rag:
-            cricket_rag = setup_cricket_rag()
+            data_dir = os.getenv("RAG_DATA_DIR", os.getenv("DATA_DIR", "data/sample"))
+            provider = os.getenv("LLM_PROVIDER")
+            cricket_rag = setup_cricket_rag(data_directory=data_dir, llm_provider=provider)
             logger.info("Cricket RAG system initialized")
         else:
             logger.warning("Cricket RAG system not available")
@@ -82,6 +89,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Serve UI at /ui if the web directory exists
+try:
+    app.mount("/ui", StaticFiles(directory="web", html=True), name="ui")
+except Exception:
+    logger.warning("Web UI static directory not found; UI will not be served.")
+
 
 # Pydantic models
 class QueryRequest(BaseModel):
@@ -89,6 +102,9 @@ class QueryRequest(BaseModel):
     query_type: str = Field(default="general", description="Type of query")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters")
     use_complex_reasoning: bool = Field(default=False, description="Use multi-hop reasoning")
+    provider: Optional[str] = Field(default=None, description="LLM provider: openai | groq | gemini")
+    model_name: Optional[str] = Field(default=None, description="Model name for the selected provider")
+    temperature: Optional[float] = Field(default=None, ge=0, le=2, description="LLM temperature override")
 
 
 class QueryResponse(BaseModel):
@@ -198,6 +214,16 @@ async def query_cricket_analytics(
                 )
         else:
             # Use standard RAG query
+            # Apply per-request LLM configuration if provided
+            if any([request.provider, request.model_name, request.temperature is not None]):
+                try:
+                    rag_system.set_llm(
+                        provider=request.provider,
+                        model_name=request.model_name,
+                        temperature=request.temperature,
+                    )
+                except Exception as cfg_err:
+                    logger.warning(f"Failed to apply per-request LLM config: {cfg_err}")
             if request.filters:
                 result = rag_system.query_with_filters(request.query, request.filters)
             else:
@@ -333,21 +359,23 @@ async def get_reasoning_graph_info(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """Handle HTTP exceptions"""
-    return ErrorResponse(
-        error=exc.detail,
+    payload = ErrorResponse(
+        error=str(exc.detail),
         detail=f"HTTP {exc.status_code}",
         timestamp=datetime.now().isoformat()
-    )
+    ).model_dump()
+    return JSONResponse(status_code=exc.status_code, content=payload)
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     """Handle general exceptions"""
     logger.error(f"Unhandled exception: {exc}")
-    return ErrorResponse(
+    payload = ErrorResponse(
         error="Internal server error",
         detail=str(exc),
         timestamp=datetime.now().isoformat()
-    )
+    ).model_dump()
+    return JSONResponse(status_code=500, content=payload)
 
 # Additional utility endpoints
 @app.get("/stats", response_model=Dict[str, Any])

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cricket Analytics RAG</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="ball">🏏</span>
+      <h1>Cricket Analytics</h1>
+      <span class="tag">RAG + LangChain</span>
+    </div>
+    <div id="health" class="health status-unknown">Checking health…</div>
+  </header>
+
+  <main class="container">
+    <section class="panel query-panel">
+      <div class="controls">
+        <div class="field">
+          <label for="provider">Provider</label>
+          <select id="provider">
+            <option value="openai">OpenAI</option>
+            <option value="groq">Groq</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="model">Model</label>
+          <input id="model" type="text" placeholder="Model name" />
+        </div>
+        <div class="field">
+          <label for="temperature">Temperature: <span id="tempVal">0.3</span></label>
+          <input id="temperature" type="range" min="0" max="2" step="0.1" value="0.3" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="query">Your question</label>
+        <textarea id="query" rows="4" placeholder="e.g., How does Virat Kohli perform against left-arm pacers in the death overs?"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="filters">Filters (optional JSON)</label>
+        <textarea id="filters" rows="3" placeholder='e.g., {"venue": "Eden Gardens"}'></textarea>
+      </div>
+
+      <div class="actions">
+        <button id="examples">Use example</button>
+        <button id="ask" class="primary">Ask</button>
+      </div>
+    </section>
+
+    <section class="panel results-panel">
+      <h2>Answer</h2>
+      <div id="answer" class="answer"></div>
+      <h3>Sources</h3>
+      <div id="sources" class="sources"></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <div>Built for cricket strategy — RAG • LangChain • FAISS/Chroma</div>
+  </footer>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

@@ -40,6 +40,23 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your API keys and configurations
 ```
+5. **Initialize Vector Store (Demo Data)**
+```powershell
+# Windows PowerShell
+$env:RAG_DATA_DIR = "data/sample"
+python .\scripts\init_vectorstore.py
+```
+
+6. **Run the API**
+```powershell
+# Choose provider and set key (example: Groq)
+$env:LLM_PROVIDER = "groq"; $env:GROQ_API_KEY = "<your-groq-key>"
+
+# Start
+.\.venv\Scripts\uvicorn.exe src.api:app --reload
+```
+
+Visit http://127.0.0.1:8000/docs to try endpoints.
 
 ### Choose Your LLM Provider
 

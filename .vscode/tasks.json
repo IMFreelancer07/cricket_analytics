@@ -1,0 +1,13 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run API (venv, FAISS)",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\uvicorn.exe src.api:app --host 0.0.0.0 --port 8000",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

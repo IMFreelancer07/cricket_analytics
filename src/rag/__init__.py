@@ -12,6 +12,7 @@ from enum import Enum
 # LangChain imports
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS  # Fallback when SQLite/Chroma persistence is unavailable
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import JSONLoader, CSVLoader
 from langchain.schema import Document, BaseMessage
@@ -61,64 +62,116 @@ class CricketQuery:
     filters: Optional[Dict[str, Any]] = None
 
 class CricketEmbeddingManager:
-    """Manage embeddings for cricket data"""
-    
+    """Manage embeddings for cricket data with FAISS/Chroma selection."""
+
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
-            separators=["\n\n", "\n", ". ", " ", ""]
+            separators=["\n\n", "\n", ". ", " ", ""],
         )
-    
-    def create_embeddings(self, documents: List[Document]) -> Chroma:
-        """
-        Create vector embeddings for cricket documents
-        
-        Args:
-            documents: List of LangChain Document objects
-            
-        Returns:
-            Chroma vector store
-        """
+        # Default to FAISS on Windows; can be overridden with RAG_VECTORSTORE=chroma
+        self.prefer = os.getenv("RAG_VECTORSTORE", "faiss" if os.name == "nt" else "chroma").lower()
+
+    def create_embeddings(self, documents: List[Document]) -> Optional[Any]:
         try:
-            # Split documents into chunks
             split_docs = self.text_splitter.split_documents(documents)
-            
-            # Create vector store
-            vectorstore = Chroma.from_documents(
-                documents=split_docs,
-                embedding=self.embeddings,
-                persist_directory="./data/vectordb",
-                collection_name="cricket_analytics"
-            )
-            
-            vectorstore.persist()
-            logger.info(f"Created embeddings for {len(split_docs)} document chunks")
-            return vectorstore
-            
+            if self.prefer == "faiss":
+                try:
+                    index = FAISS.from_documents(split_docs, self.embeddings)
+                    save_dir = "./data/faiss_index"
+                    Path(save_dir).mkdir(parents=True, exist_ok=True)
+                    index.save_local(save_dir)
+                    logger.info("Created embeddings with FAISS and saved to %s", save_dir)
+                    return index
+                except Exception as faiss_err:
+                    logger.warning(f"FAISS creation failed ({faiss_err}). Trying Chroma.")
+                try:
+                    vectorstore = Chroma.from_documents(
+                        documents=split_docs,
+                        embedding=self.embeddings,
+                        persist_directory="./data/vectordb",
+                        collection_name="cricket_analytics",
+                    )
+                    vectorstore.persist()
+                    logger.info("Created embeddings with Chroma for %d chunks", len(split_docs))
+                    return vectorstore
+                except Exception as chroma_err:
+                    logger.error(f"Failed to create Chroma embeddings: {chroma_err}")
+                    return None
+            else:
+                try:
+                    vectorstore = Chroma.from_documents(
+                        documents=split_docs,
+                        embedding=self.embeddings,
+                        persist_directory="./data/vectordb",
+                        collection_name="cricket_analytics",
+                    )
+                    vectorstore.persist()
+                    logger.info("Created embeddings with Chroma for %d chunks", len(split_docs))
+                    return vectorstore
+                except Exception as chroma_err:
+                    logger.warning(f"Chroma unavailable ({chroma_err}). Falling back to FAISS.")
+                try:
+                    index = FAISS.from_documents(split_docs, self.embeddings)
+                    save_dir = "./data/faiss_index"
+                    Path(save_dir).mkdir(parents=True, exist_ok=True)
+                    index.save_local(save_dir)
+                    logger.info("Created embeddings with FAISS and saved to %s", save_dir)
+                    return index
+                except Exception as faiss_err:
+                    logger.error(f"Failed to create FAISS embeddings: {faiss_err}")
+                    return None
         except Exception as e:
             logger.error(f"Failed to create embeddings: {e}")
             return None
-    
-    def load_existing_vectorstore(self) -> Optional[Chroma]:
-        """Load existing vector store if available"""
-        try:
-            vectorstore = Chroma(
-                persist_directory="./data/vectordb",
-                embedding_function=self.embeddings,
-                collection_name="cricket_analytics"
-            )
-            logger.info("Loaded existing vector store")
-            return vectorstore
-        except Exception as e:
-            logger.error(f"Failed to load existing vector store: {e}")
-            return None
+
+    def load_existing_vectorstore(self) -> Optional[Any]:
+        prefer = self.prefer
+        if prefer == "faiss":
+            try:
+                load_dir = "./data/faiss_index"
+                index = FAISS.load_local(load_dir, self.embeddings, allow_dangerous_deserialization=True)
+                logger.info("Loaded existing FAISS vector store from %s", load_dir)
+                return index
+            except Exception as faiss_err:
+                logger.warning(f"FAISS store unavailable ({faiss_err}). Trying Chroma.")
+            try:
+                vectorstore = Chroma(
+                    persist_directory="./data/vectordb",
+                    embedding_function=self.embeddings,
+                    collection_name="cricket_analytics",
+                )
+                logger.info("Loaded existing Chroma vector store")
+                return vectorstore
+            except Exception as chroma_err:
+                logger.error(f"Failed to load any vector store: {chroma_err}")
+                return None
+        else:
+            try:
+                vectorstore = Chroma(
+                    persist_directory="./data/vectordb",
+                    embedding_function=self.embeddings,
+                    collection_name="cricket_analytics",
+                )
+                logger.info("Loaded existing Chroma vector store")
+                return vectorstore
+            except Exception as chroma_err:
+                logger.warning(f"Chroma store unavailable ({chroma_err}). Trying FAISS.")
+            try:
+                load_dir = "./data/faiss_index"
+                index = FAISS.load_local(load_dir, self.embeddings, allow_dangerous_deserialization=True)
+                logger.info("Loaded existing FAISS vector store from %s", load_dir)
+                return index
+            except Exception as faiss_err:
+                logger.error(f"Failed to load FAISS vector store: {faiss_err}")
+                return None
 
 class CricketRetriever:
     """Retrieve relevant cricket documents based on queries"""
     
-    def __init__(self, vectorstore: Chroma, k: int = 5):
+    def __init__(self, vectorstore: Any, k: int = 5):
         self.vectorstore = vectorstore
         self.k = k
         self.retriever = vectorstore.as_retriever(search_kwargs={"k": k})
@@ -198,6 +251,34 @@ class CricketRAG:
         self.qa_chain = None
         self._setup_qa_chain()
 
+    def set_llm(
+        self,
+        *,
+        provider: Optional[str] = None,
+        model_name: Optional[str] = None,
+        temperature: Optional[float] = None,
+        openai_api_key: Optional[str] = None,
+        groq_api_key: Optional[str] = None,
+        gemini_api_key: Optional[str] = None,
+    ) -> None:
+        """Dynamically configure the LLM provider/model/temperature for this instance."""
+        if provider:
+            self.llm_provider = self._normalize_provider(provider)
+        if model_name:
+            self.model_name = model_name
+        if temperature is not None:
+            self.temperature = temperature
+
+        if openai_api_key is not None:
+            self.api_keys[LLMProvider.OPENAI.value] = openai_api_key
+        if groq_api_key is not None:
+            self.api_keys[LLMProvider.GROQ.value] = groq_api_key
+        if gemini_api_key is not None:
+            self.api_keys[LLMProvider.GEMINI.value] = gemini_api_key
+
+        self.llm = self._initialize_llm()
+        self._setup_qa_chain()
+
     def _normalize_provider(self, provider: Optional[str]) -> str:
         normalized = (provider or LLMProvider.OPENAI.value).lower()
         if normalized not in DEFAULT_LLM_MODELS:
@@ -253,8 +334,8 @@ class CricketRAG:
                         "Gemini provider requested but 'langchain-google-genai' is not installed."
                     )
                     return None
-                llm_instance = ChatGoogleGenerativeAI(
-                    api_key=api_key,
+                llm_instance = ChatGoogleGenerativeAI(  # type: ignore[call-arg]
+                    google_api_key=api_key,
                     model=self.model_name,
                     temperature=self.temperature,
                     convert_system_message_to_human=True,
